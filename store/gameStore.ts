@@ -24,6 +24,10 @@ interface GameActions {
   resolveSwap: (targetPlayerId: string) => void;
   resetGame: () => void;
   botTurn: () => void;
+  
+  // UNO Mechanics
+  declareUno: (playerId: string) => void;
+  challengeUno: (challengerId: string) => void;
 }
 
 // Map logical colors for Flip mode
@@ -84,7 +88,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     const myId = FB.auth.currentUser?.uid || uuidv4();
     
-    const player: Player = { id: myId, name: playerName, isBot: false, cardCount: 0, hand: [] };
+    const player: Player = { id: myId, name: playerName, isBot: false, cardCount: 0, hand: [], hasCalledUno: false };
     
     const initialState: Partial<GameState> = {
         roomId,
@@ -142,7 +146,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         const existing = data.players.find(p => p.id === myId);
         
         if (!existing) {
-            const player: Player = { id: myId, name: playerName, isBot: false, cardCount: 0, hand: [] };
+            const player: Player = { id: myId, name: playerName, isBot: false, cardCount: 0, hand: [], hasCalledUno: false };
             await FB.updateDoc(docRef, {
                 players: FB.arrayUnion(player)
             });
@@ -170,13 +174,13 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
 
   startLocalGame: (playerName, mode) => {
      const myId = 'player-1';
-     const player: Player = { id: myId, name: playerName || 'Player 1', isBot: false, cardCount: 0, hand: [] };
+     const player: Player = { id: myId, name: playerName || 'Player 1', isBot: false, cardCount: 0, hand: [], hasCalledUno: false };
      
      // Add bots
      const players = [player];
-     players.push({ id: 'bot-1', name: 'Bot Alpha', isBot: true, cardCount: 0, hand: [] });
-     players.push({ id: 'bot-2', name: 'Bot Beta', isBot: true, cardCount: 0, hand: [] });
-     players.push({ id: 'bot-3', name: 'Bot Gamma', isBot: true, cardCount: 0, hand: [] });
+     players.push({ id: 'bot-1', name: 'Bot Alpha', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
+     players.push({ id: 'bot-2', name: 'Bot Beta', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
+     players.push({ id: 'bot-3', name: 'Bot Gamma', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
 
      const deck = generateDeck(mode);
      
@@ -222,6 +226,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     players.forEach(p => {
       p.hand = deck.splice(0, 7);
       p.cardCount = 7;
+      p.hasCalledUno = false;
     });
 
     let startCard = deck.pop()!;
@@ -245,6 +250,37 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     };
 
     syncState(newState);
+  },
+  
+  declareUno: (playerId: string) => {
+      const state = get();
+      const players = [...state.players];
+      const p = players.find(p => p.id === playerId);
+      if (p) {
+          p.hasCalledUno = true;
+          syncState({ players, lastActionDescription: `${p.name} shouted UNO!` });
+      }
+  },
+  
+  challengeUno: (challengerId: string) => {
+      const state = get();
+      const players = [...state.players];
+      let caught = false;
+      let description = "";
+
+      // Check all opponents
+      players.forEach(p => {
+          if (p.id !== challengerId && p.hand.length === 1 && !p.hasCalledUno) {
+              // CAUGHT!
+              performDraw({ ...state, players, deck: [...state.deck], discardPile: [...state.discardPile] }, players.indexOf(p), 2);
+              description = `${p.name} caught not saying UNO! (+2)`;
+              caught = true;
+          }
+      });
+      
+      if (caught) {
+          syncState({ players, lastActionDescription: description, deck: state.deck, discardPile: state.discardPile });
+      }
   },
 
   playCard: (playerId, cardId) => {
@@ -297,6 +333,16 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
 
     // Execution
     const updates = calculatePlayUpdates(state, playerIndex, card, face.color, null);
+    
+    // Check UNO reset if cardCount > 1
+    // Actually, playCard reduces count. 
+    // If resulting hand is 1, and hasCalledUno is false, they are vulnerable.
+    // If they play their 2nd to last card, they have 1 left.
+    // We don't reset flag here, we set flag to FALSE if they draw.
+    // But if they play, they might need to call UNO again next time if they gain cards and go back down.
+    // Logic: If cardCount becomes 1, hasCalledUno is FALSE (unless they called it anticipating). 
+    // Usually UNO call is valid during the play of the 2nd to last card.
+    
     syncState({ ...updates, isBotThinking: false });
   },
 
@@ -342,6 +388,9 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         discardPile: [...state.discardPile] 
     };
     const player = newState.players[pIndex];
+
+    // RESET UNO FLAG ON DRAW
+    player.hasCalledUno = false;
 
     // --- SCENARIO 1: FORCED STACK DRAW ---
     if (state.drawStack > 0) {
@@ -395,13 +444,9 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
 
         if (playFound && drawnCard) {
             // "Must Play" logic for No Mercy
-            // If it's a Wild/Interruption, we can't fully auto-play without input.
-            // But logic says "Must Play". 
             const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
             
             if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK || face.value === CardValue.SEVEN) {
-                 // Update state to show the drawn card in hand, then trigger playCard to show modal
-                 // We sync the draw first
                  syncState({
                      deck: newState.deck,
                      discardPile: newState.discardPile,
@@ -409,7 +454,6 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
                      lastActionDescription: `${player.name} drew until playable: ${face.value}`,
                      isBotThinking: false
                  });
-                 // Then trigger the play which opens modal
                  setTimeout(() => {
                      get().playCard(player.id, drawnCard!.id);
                  }, 200);
@@ -433,8 +477,6 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
             const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
 
             if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK) {
-                // Cannot fully auto-play wilds without input.
-                // Sync state so card is in hand, then trigger modal.
                  syncState({
                      deck: newState.deck,
                      discardPile: newState.discardPile,
@@ -494,32 +536,44 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
      if (!isLocal && !isHost) return;
 
      const currentPlayer = state.players[state.currentPlayerIndex];
+     
+     // BOT LOGIC: CATCH UNO
+     // If any player has 1 card and !hasCalledUno, bot has 30% chance to catch them
+     const vulnerable = state.players.find(p => p.hand.length === 1 && !p.hasCalledUno && p.id !== currentPlayer.id);
+     if (vulnerable && Math.random() < 0.3) {
+         get().challengeUno(currentPlayer.id);
+         return; // Action taken
+     }
+
      if (!currentPlayer?.isBot) return;
 
      // Prevent re-entry if already thinking
      if (state.isBotThinking) return;
      
-     // Mark as thinking so we don't queue multiple moves for the same turn
      set({ isBotThinking: true });
 
      // Execution delay
      setTimeout(() => {
          const fresh = get();
-         // Verify it is still this bot's turn (e.g. game didn't reset, nobody played fast in Speed mode)
+         // Verify it is still this bot's turn
          if (fresh.currentPlayerIndex !== state.currentPlayerIndex || fresh.status !== 'PLAYING') {
              set({ isBotThinking: false });
              return; 
+         }
+         
+         // BOT LOGIC: CALL UNO
+         // If bot has 2 cards (will have 1 after play), call UNO with 80% chance
+         if (currentPlayer.hand.length === 2 && Math.random() < 0.8) {
+             fresh.declareUno(currentPlayer.id);
          }
 
          const hand = currentPlayer.hand;
          const playable = hand.filter(c => checkPlayable(c, fresh));
          
          if (playable.length > 0) {
-             // Basic AI: Random playable
              const move = playable[Math.floor(Math.random() * playable.length)];
              get().playCard(currentPlayer.id, move.id);
          } else {
-             // Explicitly draw and pass
              get().drawCard(currentPlayer.id);
          }
      }, 1000); // 1 second thinking time
@@ -550,14 +604,10 @@ const performDraw = (state: any, playerIdx: number, count: number) => {
 const eliminatePlayer = (state: any, pIdx: number) => {
     const player = state.players[pIdx];
     // Simple Elimination: Remove player or End Game
-    // Usually in UNO, eliminated player discards hand to discard pile
     state.discardPile.push(...player.hand);
     player.hand = [];
     player.cardCount = 0;
     
-    // Remove from array? Or mark dead?
-    // Removing makes index math hard. Mark dead is safer but UI needs update.
-    // For simplicity: Remove from array. 
     state.players.splice(pIdx, 1);
     
     let description = `${player.name} ELIMINATED (Mercy Rule)!`;
@@ -568,7 +618,6 @@ const eliminatePlayer = (state: any, pIdx: number) => {
         description += ` ${winner.name} Wins!`;
     }
 
-    // Fix index
     let nextIdx = pIdx;
     if (nextIdx >= state.players.length) nextIdx = 0;
     
@@ -619,14 +668,18 @@ const getStackValue = (v: CardValue): number => {
 };
 
 const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosenColor: CardColor, swapTargetId: string | null): Partial<GameState> => {
-    // Clone necessary state
     const players = JSON.parse(JSON.stringify(state.players)); // Deep clone for safety
     const player = players[pIdx];
     
     // Remove card
     player.hand = player.hand.filter((c: Card) => c.id !== card.id);
     player.cardCount = player.hand.length;
-
+    
+    // Reset UNO flag on play, unless they are at 1 card now (vulnerable)
+    // Actually, if they play and reach 1 card, they should have called UNO *before* or *during* this play.
+    // If they didn't, hasCalledUno is false, and they are now vulnerable until next turn.
+    // If they have 0 cards, they win.
+    
     const face = state.activeSide === 'light' ? card.light : card.dark;
     let nextColor = chosenColor || face.color;
     let nextActiveSide = state.activeSide;
@@ -647,7 +700,6 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
         description += " (Skip)";
     }
     if (face.value === CardValue.REVERSE) {
-        // Correctly handle direction flip to match type 1 | -1
         nextDirection = nextDirection === 1 ? -1 : 1;
         if (players.length === 2) nextTurnSkip = 1;
         description += " (Reverse)";
@@ -695,23 +747,14 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
     let winner = null;
     if (player.hand.length === 0) winner = player;
     
-    // MERCY RULE CHECK (Post-Play: e.g. if I swap hands with someone who has 25)
+    // MERCY RULE CHECK (Post-Play)
     if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
-        // Elimination happens here too
-        // Since we are inside calculatePlayUpdates which returns state, we need to apply elimination logic here
-        // But elimination modifies players array.
-        // We'll just mark them eliminated here or handle it simply.
-        // Re-using logic:
         const elimResult = eliminatePlayer({ ...state, players, discardPile: [...state.discardPile, card] }, pIdx);
-        // This is complex because we are mid-update.
-        // Simplified: Just set winner to other person if 1v1.
         if (players.length === 2) {
              winner = players.find((p: Player) => p.id !== player.id);
              description += " (ELIMINATED)";
              return { ...elimResult, winner, lastActionDescription: description };
         }
-        // If >2 players, we have to return the state with the player removed.
-        // The elimResult contains the correct players array.
         return { ...elimResult, lastActionDescription: description + " (ELIMINATED)" };
     }
 
