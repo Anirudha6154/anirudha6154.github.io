@@ -18,11 +18,11 @@ export const GameBoard: React.FC = () => {
 
   // Identify Me
   const myIndex = players.findIndex(p => p.id === myId);
-  const player = players[myIndex] || players[0]; // Fallback if something weird happens
+  const player = players[myIndex] || players[0]; 
 
   const topCard = discardPile[discardPile.length - 1];
 
-  // Bots (Host Only runs logic, handled in store)
+  // Bots
   useEffect(() => {
     if (store.status === 'PLAYING') {
       store.botTurn();
@@ -64,6 +64,12 @@ export const GameBoard: React.FC = () => {
       }
   }
 
+  // UNO BUTTON LOGIC
+  const canCallUno = player.hand.length <= 2 && !player.hasCalledUno;
+  const vulnerableOpponent = opponents.find(p => p.cardCount === 1 && !p.hasCalledUno);
+  const showUnoBtn = canCallUno || vulnerableOpponent;
+  const isCatchAction = !!vulnerableOpponent && !canCallUno;
+
   // --- DYNAMIC HAND LAYOUT CALCULATION ---
   const handSize = player.hand.length;
   const cardWidth = 90; 
@@ -71,30 +77,11 @@ export const GameBoard: React.FC = () => {
   const maxHandWidth = Math.min(windowWidth - containerPadding, 1000); 
   
   let marginLeft = -40; // Default overlap
-  let scale = 1;
-
   if (handSize > 1) {
-      // Calculate how much space we have per card
-      // total width = cardWidth + (handSize - 1) * (cardWidth + margin)
-      // (handSize - 1) * (cardWidth + margin) = maxHandWidth - cardWidth
-      // cardWidth + margin = (maxHandWidth - cardWidth) / (handSize - 1)
       const spacePerCard = (maxHandWidth - cardWidth) / (handSize - 1);
-      
-      // The overlapping margin is spacePerCard - cardWidth
       let calculatedMargin = spacePerCard - cardWidth;
-      
-      // Clamp the margin. 
-      // Ensure they don't spread out too much (max -40px means at least 40px overlap)
       if (calculatedMargin > -40) calculatedMargin = -40;
-      
-      // If cards are too tight (less than 20px visible), start scaling down
-      if (calculatedMargin < -70) {
-          calculatedMargin = -70; // Cap overlap
-          // Apply scale if we still don't fit? 
-          // For now, capping overlap at -70 ensures 20px visible strip.
-          // If 20px strip is too wide for screen, we might overflow, but overflow-x is hidden on body.
-          // Let's rely on flex shrink if needed, but manual calculation is cleaner.
-      }
+      if (calculatedMargin < -70) calculatedMargin = -70; 
       marginLeft = calculatedMargin;
   }
 
@@ -104,7 +91,6 @@ export const GameBoard: React.FC = () => {
       {/* 1. Opponents Row */}
       <div id="opponents-row">
         {opponents.map((opp) => {
-           // Calculate if it is their turn
            const isTurn = players[currentPlayerIndex]?.id === opp.id;
            return (
              <div key={opp.id} className={`opponent ${isTurn ? 'active' : ''}`}>
@@ -113,6 +99,7 @@ export const GameBoard: React.FC = () => {
                 <div style={{fontSize: '1.2rem'}} className={opp.cardCount >= 20 ? 'mercy-warning' : ''}>
                     {opp.cardCount}
                 </div>
+                {opp.hasCalledUno && <div style={{position:'absolute', top:-10, right:-10, background:'red', borderRadius:'50%', padding:'2px 5px', fontSize:'0.7rem', fontWeight:'bold'}}>UNO</div>}
              </div>
            );
         })}
@@ -120,7 +107,16 @@ export const GameBoard: React.FC = () => {
 
       {/* 2. Center Table */}
       <div id="center-table">
-          <div id="direction-badge">{direction === 1 ? '↻' : '↺'}</div>
+          {/* DIRECTION INDICATOR */}
+          <div 
+            id="direction-badge" 
+            style={{ 
+                transform: direction === 1 ? 'rotate(0deg)' : 'rotate(180deg)',
+                opacity: 0.2
+            }}
+          >
+            ↻
+          </div>
           
           {drawStack > 0 && (
              <div id="stack-badge">STACK +{drawStack}</div>
@@ -156,7 +152,6 @@ export const GameBoard: React.FC = () => {
              const isValidMove = checkPlayable(card, store);
              const canPlay = isMyTurn && isValidMove;
              
-             // Apply dynamic margin to all cards except the first one
              const style: React.CSSProperties = {
                  zIndex: idx,
                  marginLeft: idx === 0 ? 0 : `${marginLeft}px`,
@@ -174,6 +169,16 @@ export const GameBoard: React.FC = () => {
              )
          })}
       </div>
+
+      {/* UNO BUTTON */}
+      {showUnoBtn && (
+          <button 
+            className={`uno-btn ${isCatchAction ? 'catch' : ''}`} 
+            onClick={() => isCatchAction ? store.challengeUno(player.id) : store.declareUno(player.id)}
+          >
+              {isCatchAction ? 'CATCH!' : 'UNO!'}
+          </button>
+      )}
 
       {/* MODALS */}
       {isPickingColor && (
