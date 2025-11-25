@@ -35,6 +35,7 @@ export enum CardValue {
   DISCARD_ALL = 'discard_all',
   WILD_DRAW_SIX = '+6',
   WILD_DRAW_TEN = '+10',
+  WILD_COLOR_ROULETTE = 'roulette',
   
   // Flip Specifics (Dark Side)
   DRAW_FIVE = '+5',
@@ -84,6 +85,7 @@ export interface GameState {
   activeSide: 'light' | 'dark';
   drawStack: number;
   currentColor: CardColor; // Tracks the active color (important for Wilds)
+  rouletteColor: CardColor | null; // Tracks target color for Roulette
   
   // Interruption States (Modals)
   pendingAction: {
@@ -112,6 +114,7 @@ export const INITIAL_GAME_STATE: GameState = {
   activeSide: 'light',
   drawStack: 0,
   currentColor: CardColor.RED,
+  rouletteColor: null,
   pendingAction: { type: null },
   winner: null,
   lastActionDescription: 'Welcome to Chaos UNO',
