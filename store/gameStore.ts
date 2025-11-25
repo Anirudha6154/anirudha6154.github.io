@@ -516,7 +516,8 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
         description += " (Skip)";
     }
     if (face.value === CardValue.REVERSE) {
-        nextDirection *= -1 as 1 | -1;
+        // Correctly handle direction flip to match type 1 | -1
+        nextDirection = nextDirection === 1 ? -1 : 1;
         if (players.length === 2) nextTurnSkip = 1;
         description += " (Reverse)";
     }
