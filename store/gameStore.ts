@@ -328,21 +328,32 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
 
   drawCard: (playerId) => {
     const state = get();
-    // Validate Turn
     if (state.gameMode !== GameMode.SPEED) {
         if (state.players[state.currentPlayerIndex]?.id !== playerId) return;
     }
 
     const pIndex = state.players.findIndex(p => p.id === playerId);
     
-    // Logic extraction
-    const newState = { ...state, players: [...state.players], deck: [...state.deck], discardPile: [...state.discardPile] };
-    const player = { ...newState.players[pIndex], hand: [...newState.players[pIndex].hand] };
-    newState.players[pIndex] = player;
+    // Deep Clone State for modification
+    const newState = { 
+        ...state, 
+        players: state.players.map(p => ({...p, hand: [...p.hand]})), 
+        deck: [...state.deck], 
+        discardPile: [...state.discardPile] 
+    };
+    const player = newState.players[pIndex];
 
-    // STACK PENALTY
+    // --- SCENARIO 1: FORCED STACK DRAW ---
     if (state.drawStack > 0) {
         performDraw(newState, pIndex, state.drawStack);
+        
+        // NO MERCY: Check Elimination
+        if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
+             const updates = eliminatePlayer(newState, pIndex);
+             syncState({ ...updates, isBotThinking: false });
+             return;
+        }
+
         const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
         
         syncState({
@@ -357,18 +368,102 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         return;
     }
 
-    // STANDARD DRAW
-    performDraw(newState, pIndex, 1);
-    const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
+    // --- SCENARIO 2: VOLUNTARY DRAW ---
     
-    syncState({
-        deck: newState.deck,
-        discardPile: newState.discardPile,
-        players: newState.players,
-        currentPlayerIndex: nextIdx,
-        lastActionDescription: `${player.name} drew and passed`,
-        isBotThinking: false
-    });
+    // NO MERCY: Draw Until Playable
+    if (state.gameMode === GameMode.NO_MERCY) {
+        let drawnCard: Card | null = null;
+        let playFound = false;
+
+        // Loop until playable or eliminated
+        while (!playFound) {
+            const drawn = performDraw(newState, pIndex, 1);
+            if (drawn.length === 0) break; // Deck empty and discard empty (rare)
+            drawnCard = drawn[0];
+
+            // Check Elimination
+            if (player.hand.length >= 25) {
+                 const updates = eliminatePlayer(newState, pIndex);
+                 syncState({ ...updates, isBotThinking: false });
+                 return;
+            }
+
+            if (checkPlayable(drawnCard, state)) {
+                playFound = true;
+            }
+        }
+
+        if (playFound && drawnCard) {
+            // "Must Play" logic for No Mercy
+            // If it's a Wild/Interruption, we can't fully auto-play without input.
+            // But logic says "Must Play". 
+            const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
+            
+            if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK || face.value === CardValue.SEVEN) {
+                 // Update state to show the drawn card in hand, then trigger playCard to show modal
+                 // We sync the draw first
+                 syncState({
+                     deck: newState.deck,
+                     discardPile: newState.discardPile,
+                     players: newState.players,
+                     lastActionDescription: `${player.name} drew until playable: ${face.value}`,
+                     isBotThinking: false
+                 });
+                 // Then trigger the play which opens modal
+                 setTimeout(() => {
+                     get().playCard(player.id, drawnCard!.id);
+                 }, 200);
+                 return;
+            }
+
+            // Normal Card: Auto Play immediately
+            const updates = calculatePlayUpdates(newState as GameState, pIndex, drawnCard, face.color, null);
+            syncState({ ...updates, isBotThinking: false });
+        }
+        return;
+    } 
+    
+    // CLASSIC / FLIP / SPEED: Draw 1, Must Play if Playable
+    else {
+        const drawn = performDraw(newState, pIndex, 1);
+        const drawnCard = drawn[0];
+        
+        if (drawnCard && checkPlayable(drawnCard, state)) {
+            // Auto Play Logic
+            const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
+
+            if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK) {
+                // Cannot fully auto-play wilds without input.
+                // Sync state so card is in hand, then trigger modal.
+                 syncState({
+                     deck: newState.deck,
+                     discardPile: newState.discardPile,
+                     players: newState.players,
+                     lastActionDescription: `${player.name} drew a Playable Wild!`,
+                     isBotThinking: false
+                 });
+                 setTimeout(() => {
+                     get().playCard(player.id, drawnCard.id);
+                 }, 200);
+                 return;
+            }
+
+            // Execute Play immediately
+            const updates = calculatePlayUpdates(newState as GameState, pIndex, drawnCard, face.color, null);
+            syncState({ ...updates, isBotThinking: false });
+        } else {
+            // Pass Turn
+            const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
+            syncState({
+                deck: newState.deck,
+                discardPile: newState.discardPile,
+                players: newState.players,
+                currentPlayerIndex: nextIdx,
+                lastActionDescription: `${player.name} drew and passed`,
+                isBotThinking: false
+            });
+        }
+    }
   },
 
   resetGame: () => {
@@ -449,6 +544,42 @@ const performDraw = (state: any, playerIdx: number, count: number) => {
     }
     state.players[playerIdx].hand.push(...drawn);
     state.players[playerIdx].cardCount = state.players[playerIdx].hand.length;
+    return drawn;
+};
+
+const eliminatePlayer = (state: any, pIdx: number) => {
+    const player = state.players[pIdx];
+    // Simple Elimination: Remove player or End Game
+    // Usually in UNO, eliminated player discards hand to discard pile
+    state.discardPile.push(...player.hand);
+    player.hand = [];
+    player.cardCount = 0;
+    
+    // Remove from array? Or mark dead?
+    // Removing makes index math hard. Mark dead is safer but UI needs update.
+    // For simplicity: Remove from array. 
+    state.players.splice(pIdx, 1);
+    
+    let description = `${player.name} ELIMINATED (Mercy Rule)!`;
+    let winner = null;
+    
+    if (state.players.length === 1) {
+        winner = state.players[0];
+        description += ` ${winner.name} Wins!`;
+    }
+
+    // Fix index
+    let nextIdx = pIdx;
+    if (nextIdx >= state.players.length) nextIdx = 0;
+    
+    return {
+        deck: state.deck,
+        discardPile: state.discardPile,
+        players: state.players,
+        currentPlayerIndex: nextIdx,
+        lastActionDescription: description,
+        winner
+    };
 };
 
 export const checkPlayable = (card: Card, state: GameState): boolean => {
@@ -563,10 +694,25 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
     // Win Check
     let winner = null;
     if (player.hand.length === 0) winner = player;
+    
+    // MERCY RULE CHECK (Post-Play: e.g. if I swap hands with someone who has 25)
     if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
-        description += " (ELIMINATED)";
-        // Simple elimination logic: For now, just declare other winner if 1v1, or just game over
-        winner = players.find((p: Player) => p.id !== player.id) || player; 
+        // Elimination happens here too
+        // Since we are inside calculatePlayUpdates which returns state, we need to apply elimination logic here
+        // But elimination modifies players array.
+        // We'll just mark them eliminated here or handle it simply.
+        // Re-using logic:
+        const elimResult = eliminatePlayer({ ...state, players, discardPile: [...state.discardPile, card] }, pIdx);
+        // This is complex because we are mid-update.
+        // Simplified: Just set winner to other person if 1v1.
+        if (players.length === 2) {
+             winner = players.find((p: Player) => p.id !== player.id);
+             description += " (ELIMINATED)";
+             return { ...elimResult, winner, lastActionDescription: description };
+        }
+        // If >2 players, we have to return the state with the player removed.
+        // The elimResult contains the correct players array.
+        return { ...elimResult, lastActionDescription: description + " (ELIMINATED)" };
     }
 
     // Next Turn
