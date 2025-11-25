@@ -6,7 +6,7 @@ import { CardColor } from '../types';
 
 export const GameBoard: React.FC = () => {
   const store = useGameStore();
-  const { players, discardPile, currentPlayerIndex, activeSide, lastActionDescription, pendingAction, currentColor, drawStack, direction, myId } = store;
+  const { players, discardPile, currentPlayerIndex, activeSide, lastActionDescription, pendingAction, currentColor, drawStack, rouletteColor, direction, myId } = store;
   
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -16,20 +16,17 @@ export const GameBoard: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Identify Me
   const myIndex = players.findIndex(p => p.id === myId);
   const player = players[myIndex] || players[0]; 
 
   const topCard = discardPile[discardPile.length - 1];
 
-  // Bots
   useEffect(() => {
     if (store.status === 'PLAYING') {
       store.botTurn();
     }
   }, [currentPlayerIndex, store.status, store]);
 
-  // Theme Sync
   useEffect(() => {
     if (activeSide === 'dark') {
       document.body.classList.add('dark-mode');
@@ -38,7 +35,6 @@ export const GameBoard: React.FC = () => {
     }
   }, [activeSide]);
 
-  // Modals
   const isPickingColor = pendingAction.type === 'PICK_COLOR';
   const colors = activeSide === 'light' 
     ? [CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW]
@@ -47,14 +43,12 @@ export const GameBoard: React.FC = () => {
   const isSwapping = pendingAction.type === 'SWAP_HANDS';
   const swapTargets = players.filter(p => p.id !== player.id);
 
-  // Helper for glow
   const activeColorHex = {
     [CardColor.RED]: '#ff5555', [CardColor.BLUE]: '#5555ff', [CardColor.GREEN]: '#55aa55', [CardColor.YELLOW]: '#ffaa00',
     [CardColor.PURPLE]: '#aa00ff', [CardColor.ORANGE]: '#ff6600', [CardColor.TEAL]: '#00aaaa', [CardColor.PINK]: '#ff00aa',
     [CardColor.WILD]: '#fff', [CardColor.WILD_DARK]: '#fff'
   }[currentColor] || '#fff';
 
-  // Calculate Opponents Order (Rotated so I am always bottom)
   const opponents = [];
   const count = players.length;
   if (count > 0) {
@@ -64,19 +58,17 @@ export const GameBoard: React.FC = () => {
       }
   }
 
-  // UNO BUTTON LOGIC
   const canCallUno = player.hand.length <= 2 && !player.hasCalledUno;
   const vulnerableOpponent = opponents.find(p => p.cardCount === 1 && !p.hasCalledUno);
   const showUnoBtn = canCallUno || vulnerableOpponent;
   const isCatchAction = !!vulnerableOpponent && !canCallUno;
 
-  // --- DYNAMIC HAND LAYOUT CALCULATION ---
   const handSize = player.hand.length;
   const cardWidth = 90; 
   const containerPadding = 20;
   const maxHandWidth = Math.min(windowWidth - containerPadding, 1000); 
   
-  let marginLeft = -40; // Default overlap
+  let marginLeft = -40; 
   if (handSize > 1) {
       const spacePerCard = (maxHandWidth - cardWidth) / (handSize - 1);
       let calculatedMargin = spacePerCard - cardWidth;
@@ -88,7 +80,6 @@ export const GameBoard: React.FC = () => {
   return (
     <div id="game-layout">
       
-      {/* 1. Opponents Row */}
       <div id="opponents-row">
         {opponents.map((opp) => {
            const isTurn = players[currentPlayerIndex]?.id === opp.id;
@@ -105,9 +96,7 @@ export const GameBoard: React.FC = () => {
         })}
       </div>
 
-      {/* 2. Center Table */}
       <div id="center-table">
-          {/* DIRECTION INDICATOR */}
           <div 
             id="direction-badge" 
             style={{ 
@@ -122,17 +111,18 @@ export const GameBoard: React.FC = () => {
              <div id="stack-badge">STACK +{drawStack}</div>
           )}
 
-          {/* Status Text */}
+          {rouletteColor && (
+             <div id="stack-badge" style={{color: activeColorHex}}>TARGET: {rouletteColor}</div>
+          )}
+
           <div className="info-badge" style={{ top: -80, opacity: 0.7 }}>
              {lastActionDescription}
           </div>
 
-          {/* Draw Pile */}
           <div className="pile" id="draw-pile" onClick={() => store.drawCard(player.id)}>
              <div style={{color:'white', fontWeight:'bold'}}>DRAW</div>
           </div>
 
-          {/* Discard Pile */}
           <div 
             className="pile" 
             id="discard-pile"
@@ -145,7 +135,6 @@ export const GameBoard: React.FC = () => {
           </div>
       </div>
 
-      {/* 3. Player Hand */}
       <div id="player-hand">
          {player.hand.map((card, idx) => {
              const isMyTurn = players[currentPlayerIndex]?.id === player.id;
@@ -170,7 +159,6 @@ export const GameBoard: React.FC = () => {
          })}
       </div>
 
-      {/* UNO BUTTON */}
       {showUnoBtn && (
           <button 
             className={`uno-btn ${isCatchAction ? 'catch' : ''}`} 
@@ -180,7 +168,6 @@ export const GameBoard: React.FC = () => {
           </button>
       )}
 
-      {/* MODALS */}
       {isPickingColor && (
           <div className="modal">
               <div className="panel">
