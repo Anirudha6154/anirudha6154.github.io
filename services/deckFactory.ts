@@ -1,3 +1,4 @@
+
 import { Card, CardColor, CardValue, GameMode, CardFace } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -15,20 +16,18 @@ export const generateDeck = (mode: GameMode): Card[] => {
   const colors = [CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW];
   const darkColors = [CardColor.ORANGE, CardColor.PINK, CardColor.TEAL, CardColor.PURPLE];
 
-  // Basic number generation (Simplification for brevity, usually 0-9 with dupes of 1-9)
+  // Basic number generation
   colors.forEach((color, idx) => {
     const darkColor = darkColors[idx];
 
     // Numbers 0-9
     for (let i = 0; i <= 9; i++) {
-      // In a real deck, 1-9 appear twice, 0 once.
-      // We'll do single set for demo lightness, double for gameplay feel
       const count = i === 0 ? 1 : 2;
       for (let c = 0; c < count; c++) {
         const valStr = i.toString() as CardValue;
         deck.push(createCard(
           { color, value: valStr, type: 'number' },
-          { color: darkColor, value: valStr, type: 'number' } // Flip mapping usually differs, simplifying here
+          { color: darkColor, value: valStr, type: 'number' }
         ));
       }
     }
@@ -38,7 +37,7 @@ export const generateDeck = (mode: GameMode): Card[] => {
       for (let c = 0; c < 2; c++) {
         deck.push(createCard(
           { color, value: action, type: 'action' },
-          { color: darkColor, value: action === CardValue.DRAW_TWO ? CardValue.DRAW_FIVE : CardValue.SKIP_EVERYONE, type: 'action' } // Making Dark side meaner
+          { color: darkColor, value: action === CardValue.DRAW_TWO ? CardValue.DRAW_FIVE : CardValue.SKIP_EVERYONE, type: 'action' }
         ));
       }
     });
@@ -58,7 +57,6 @@ export const generateDeck = (mode: GameMode): Card[] => {
 
   // Mode Specific Additions
   if (mode === GameMode.FLIP) {
-    // Add Flip Cards
     colors.forEach((color, idx) => {
       for (let c = 0; c < 2; c++) {
         deck.push(createCard(
@@ -70,10 +68,15 @@ export const generateDeck = (mode: GameMode): Card[] => {
   }
   
   if (mode === GameMode.NO_MERCY) {
-      // Add Discard Alls, etc. (Simulated by reusing existing slots for demo or adding extra)
       colors.forEach(color => {
          deck.push(createCard({ color, value: CardValue.DISCARD_ALL, type: 'action' }));
       });
+      // Add No Mercy Wilds
+      for (let i = 0; i < 4; i++) {
+          deck.push(createCard({ color: CardColor.WILD, value: CardValue.WILD_DRAW_SIX, type: 'wild' }));
+          deck.push(createCard({ color: CardColor.WILD, value: CardValue.WILD_DRAW_TEN, type: 'wild' }));
+          deck.push(createCard({ color: CardColor.WILD, value: CardValue.WILD_COLOR_ROULETTE, type: 'wild' }));
+      }
   }
 
   return shuffle(deck);
