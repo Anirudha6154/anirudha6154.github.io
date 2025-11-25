@@ -21,6 +21,7 @@ const getSymbol = (val: CardValue) => {
     case CardValue.WILD_DRAW_FOUR: return '+4';
     case CardValue.WILD_DRAW_SIX: return '+6';
     case CardValue.WILD_DRAW_TEN: return '+10';
+    case CardValue.WILD_COLOR_ROULETTE: return '⏣'; // Benzene ring/target symbol
     case CardValue.DRAW_FIVE: return '+5';
     case CardValue.SKIP_EVERYONE: return '⏭';
     case CardValue.DISCARD_ALL: return '♻';
@@ -33,11 +34,9 @@ export const Card: React.FC<CardProps> = ({ card, activeSide, onClick, isPlayabl
   const face = activeSide === 'light' ? card.light : card.dark;
   const symbol = getSymbol(face.value);
   
-  // Mapping global CSS classes
-  const colorClass = face.color; // The enum values (red, blue, etc.) match the CSS classes
+  const colorClass = face.color;
 
   if (isHidden) {
-    // Render Back of card
     const isDark = activeSide === 'dark';
     return (
       <div 
