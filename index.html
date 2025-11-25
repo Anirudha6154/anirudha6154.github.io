@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>UNO: Chaos Collection</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap" rel="stylesheet">
     <style>
         :root {
             --red: #ff5555; --blue: #5555ff; --green: #55aa55; --yellow: #ffaa00;
             --purple: #aa00ff; --orange: #ff6600; --teal: #00aaaa; --pink: #ff00aa;
             --bg: #2c3e50; --dark-bg: #1a1a2e; --black: #111;
         }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; transition: background 0.5s; }
+        body { font-family: 'Montserrat', sans-serif; background: var(--bg); color: white; margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; transition: background 0.5s; }
         body.dark-mode { background: var(--dark-bg); }
 
         /* SCREENS */
@@ -20,8 +21,8 @@
 
         /* LOBBY */
         .panel { background: rgba(0,0,0,0.5); padding: 30px; border-radius: 20px; text-align: center; backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); }
-        input, select { padding: 12px; font-size: 1.1rem; border-radius: 8px; border: none; margin: 10px; width: 200px; text-align: center; color: black; }
-        button { padding: 12px 24px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; background: var(--yellow); font-weight: bold; margin: 5px; transition: 0.2s; color: black; }
+        input, select { padding: 12px; font-size: 1.1rem; border-radius: 8px; border: none; margin: 10px; width: 200px; text-align: center; color: black; font-family: 'Montserrat', sans-serif; }
+        button { padding: 12px 24px; font-size: 1.1rem; border-radius: 8px; border: none; cursor: pointer; background: var(--yellow); font-weight: bold; margin: 5px; transition: 0.2s; color: black; font-family: 'Montserrat', sans-serif; }
         button:hover:not(:disabled) { transform: scale(1.05); filter: brightness(1.1); }
         button:disabled { filter: grayscale(1); cursor: not-allowed; opacity: 0.5; }
 
@@ -42,7 +43,7 @@
         
         .info-badge { position: absolute; background: rgba(0,0,0,0.8); padding: 5px 10px; border-radius: 15px; font-size: 0.9rem; font-weight: bold; white-space: nowrap; pointer-events: none; }
         #stack-badge { top: -60px; color: var(--red); font-size: 1.5rem; display: block; text-shadow: 0 2px 5px black; font-weight: 900; animation: bounce 1s infinite; }
-        #direction-badge { font-size: 10rem; opacity: 0.1; position: absolute; z-index: -1; pointer-events: none; user-select: none; }
+        #direction-badge { font-size: 10rem; opacity: 0.1; position: absolute; z-index: -1; pointer-events: none; user-select: none; transition: transform 0.5s; }
 
         /* Player Hand */
         #player-hand { display: flex; justify-content: center; align-items: flex-end; perspective: 1000px; padding-bottom: 20px; width: 100%; }
@@ -89,27 +90,49 @@
         .mercy-warning { color: red; font-weight: bold; animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.5; } }
         @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        
+        .uno-btn {
+            position: absolute;
+            bottom: 150px;
+            right: 20px;
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ffaa00, #ff5500);
+            border: 5px solid white;
+            box-shadow: 0 0 20px rgba(255, 170, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: 900;
+            cursor: pointer;
+            z-index: 200;
+            animation: pulse 2s infinite;
+        }
+        .uno-btn:hover { transform: scale(1.1); }
+        .uno-btn.catch { background: linear-gradient(135deg, #ff0000, #aa0000); }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 170, 0, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(255, 170, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 170, 0, 0); } }
+
     </style>
-<script type="importmap">
+  <script type="importmap">
 {
   "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
-    "zustand": "https://aistudiocdn.com/zustand@^5.0.8",
     "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
     "vite": "https://aistudiocdn.com/vite@^7.2.4",
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "zustand": "https://aistudiocdn.com/zustand@^5.0.8"
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root" style="height: 100%;"></div>
     <!-- Vite entry point -->
     <script type="module" src="./index.tsx"></script>
-  <script type="module" src="/index.tsx"></script>
-</body>
+  </body>
 </html>
