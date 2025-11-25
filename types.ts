@@ -61,6 +61,7 @@ export interface Player {
   isBot: boolean;
   cardCount: number;
   hand: Card[];
+  hasCalledUno: boolean; // New Flag for UNO logic
 }
 
 export interface GameState {
