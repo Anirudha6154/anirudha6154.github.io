@@ -100,8 +100,7 @@ export const GameBoard: React.FC = () => {
           <div 
             id="direction-badge" 
             style={{ 
-                transform: direction === 1 ? 'rotate(0deg)' : 'rotate(180deg)',
-                opacity: 0.2
+                transform: `translate(-50%, -50%) ${direction === 1 ? 'rotate(0deg)' : 'rotate(180deg)'}`,
             }}
           >
             ↻
