@@ -52,10 +52,8 @@ const syncState = (state: Partial<ExtendedGameState>) => {
     const s = useGameStore.getState();
     if (s.roomId && FB.db) {
         // We never write 'myId' to the shared doc
-        // We only write shared state
         const { myId, roomId, pendingAction, isBotThinking, ...sharedState } = state as any;
         
-        // Handle local-only state explicitly in multiplayer mode
         if (isBotThinking !== undefined) {
              useGameStore.setState({ isBotThinking });
         }
@@ -109,7 +107,6 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     
     set({ ...INITIAL_GAME_STATE, ...initialState, myId });
     
-    // Subscribe
     if (unsubscribe) unsubscribe();
     unsubscribe = FB.onSnapshot(FB.doc(FB.db, 'games', roomId), (doc: any) => {
         if (doc.exists()) {
@@ -141,7 +138,6 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         const d = await FB.getDoc(docRef);
         if (!d.exists()) return false;
         
-        // Check if already in
         const data = d.data() as GameState;
         const existing = data.players.find(p => p.id === myId);
         
@@ -176,18 +172,13 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
      const myId = 'player-1';
      const player: Player = { id: myId, name: playerName || 'Player 1', isBot: false, cardCount: 0, hand: [], hasCalledUno: false };
      
-     // Add bots
      const players = [player];
      players.push({ id: 'bot-1', name: 'Bot Alpha', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
      players.push({ id: 'bot-2', name: 'Bot Beta', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
      players.push({ id: 'bot-3', name: 'Bot Gamma', isBot: true, cardCount: 0, hand: [], hasCalledUno: false });
 
      const deck = generateDeck(mode);
-     
-     players.forEach(p => {
-       p.hand = deck.splice(0, 7);
-       p.cardCount = 7;
-     });
+     players.forEach(p => { p.hand = deck.splice(0, 7); p.cardCount = 7; });
 
      let startCard = deck.pop()!;
      while (startCard.light.color === CardColor.WILD) {
@@ -201,7 +192,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
        status: 'PLAYING',
        roomId: null,
        myId,
-       hostId: myId, // You are host of local game
+       hostId: myId,
        deck,
        players,
        discardPile: [startCard],
@@ -210,13 +201,13 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
        currentColor: startCard.light.color,
        direction: 1,
        drawStack: 0,
+       rouletteColor: null,
        winner: null,
        lastActionDescription: "Local Game Started!"
      });
   },
 
   startGame: () => {
-    // Only Host can start (Multiplayer)
     const state = get();
     if (state.roomId && state.hostId !== state.myId) return;
     
@@ -245,6 +236,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
       currentColor: startCard.light.color,
       direction: 1,
       drawStack: 0,
+      rouletteColor: null,
       winner: null,
       lastActionDescription: "Game Started!"
     };
@@ -268,10 +260,8 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
       let caught = false;
       let description = "";
 
-      // Check all opponents
       players.forEach(p => {
           if (p.id !== challengerId && p.hand.length === 1 && !p.hasCalledUno) {
-              // CAUGHT!
               performDraw({ ...state, players, deck: [...state.deck], discardPile: [...state.discardPile] }, players.indexOf(p), 2);
               description = `${p.name} caught not saying UNO! (+2)`;
               caught = true;
@@ -285,13 +275,11 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
 
   playCard: (playerId, cardId) => {
     const state = get();
-    // Validate Turn (unless Speed mode)
     if (state.gameMode !== GameMode.SPEED) {
         const isMyTurn = state.players[state.currentPlayerIndex]?.id === playerId;
         if (!isMyTurn) return;
     }
     
-    // If pending action exists, block play
     if (state.pendingAction.type && state.pendingAction.type !== 'PICK_COLOR' && state.pendingAction.type !== 'SWAP_HANDS') return;
 
     const playerIndex = state.players.findIndex(p => p.id === playerId);
@@ -301,15 +289,11 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     const card = player.hand.find(c => c.id === cardId);
     if (!card) return;
 
-    // RULE VALIDATION
-    if (!checkPlayable(card, state)) {
-        return;
-    }
+    if (!checkPlayable(card, state)) return;
 
     const face = state.activeSide === 'light' ? card.light : card.dark;
     
-    // --- INTERRUPTIONS (LOCAL ONLY) ---
-    // These only set local UI state for the player to make a choice
+    // --- INTERRUPTIONS (Local UI Only) ---
     if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK) {
          set({ pendingAction: { type: 'PICK_COLOR', cardId: card.id } });
          if (player.isBot) {
@@ -331,30 +315,19 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
          return;
     }
 
-    // Execution
     const updates = calculatePlayUpdates(state, playerIndex, card, face.color, null);
-    
-    // Check UNO reset if cardCount > 1
-    // Actually, playCard reduces count. 
-    // If resulting hand is 1, and hasCalledUno is false, they are vulnerable.
-    // If they play their 2nd to last card, they have 1 left.
-    // We don't reset flag here, we set flag to FALSE if they draw.
-    // But if they play, they might need to call UNO again next time if they gain cards and go back down.
-    // Logic: If cardCount becomes 1, hasCalledUno is FALSE (unless they called it anticipating). 
-    // Usually UNO call is valid during the play of the 2nd to last card.
-    
     syncState({ ...updates, isBotThinking: false });
   },
 
   resolveColorSelection: (color) => {
       const state = get();
       if (state.pendingAction.type !== 'PICK_COLOR') return;
-      const playerIndex = state.currentPlayerIndex; // Should be current player
+      const playerIndex = state.currentPlayerIndex;
       const player = state.players[playerIndex];
       const card = player.hand.find(c => c.id === state.pendingAction.cardId);
       if (!card) return;
 
-      set({ pendingAction: { type: null } }); // Clear local UI
+      set({ pendingAction: { type: null } });
       const updates = calculatePlayUpdates(state, playerIndex, card, color, null);
       syncState({ ...updates, isBotThinking: false });
   },
@@ -379,8 +352,6 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
     }
 
     const pIndex = state.players.findIndex(p => p.id === playerId);
-    
-    // Deep Clone State for modification
     const newState = { 
         ...state, 
         players: state.players.map(p => ({...p, hand: [...p.hand]})), 
@@ -388,23 +359,53 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         discardPile: [...state.discardPile] 
     };
     const player = newState.players[pIndex];
-
-    // RESET UNO FLAG ON DRAW
     player.hasCalledUno = false;
 
-    // --- SCENARIO 1: FORCED STACK DRAW ---
-    if (state.drawStack > 0) {
-        performDraw(newState, pIndex, state.drawStack);
+    // SCENARIO 1: FORCED STACK / ROULETTE
+    if (state.drawStack > 0 || state.rouletteColor) {
         
-        // NO MERCY: Check Elimination
+        // ROULETTE LOGIC: Draw until color
+        if (state.rouletteColor) {
+             let found = false;
+             let count = 0;
+             while (!found) {
+                 const drawn = performDraw(newState, pIndex, 1);
+                 if (drawn.length === 0) break;
+                 count++;
+                 const face = state.activeSide === 'light' ? drawn[0].light : drawn[0].dark;
+                 if (face.color === state.rouletteColor || face.color === CardColor.WILD || face.color === CardColor.WILD_DARK) {
+                     found = true;
+                 }
+                 if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) break;
+             }
+             
+             if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
+                 const updates = eliminatePlayer(newState, pIndex);
+                 syncState({ ...updates, isBotThinking: false });
+                 return;
+             }
+
+             const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
+             syncState({
+                deck: newState.deck,
+                discardPile: newState.discardPile,
+                players: newState.players,
+                rouletteColor: null, // Reset Roulette
+                currentPlayerIndex: nextIdx,
+                lastActionDescription: `${player.name} drew ${count} cards for Roulette!`,
+                isBotThinking: false
+             });
+             return;
+        }
+
+        // STACK LOGIC
+        performDraw(newState, pIndex, state.drawStack);
         if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
              const updates = eliminatePlayer(newState, pIndex);
              syncState({ ...updates, isBotThinking: false });
              return;
         }
-
         const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
-        
         syncState({
             deck: newState.deck,
             discardPile: newState.discardPile,
@@ -417,20 +418,17 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         return;
     }
 
-    // --- SCENARIO 2: VOLUNTARY DRAW ---
-    
-    // NO MERCY: Draw Until Playable
+    // SCENARIO 2: VOLUNTARY DRAW (Classic / No Mercy)
     if (state.gameMode === GameMode.NO_MERCY) {
+        // Draw Until Playable
         let drawnCard: Card | null = null;
         let playFound = false;
 
-        // Loop until playable or eliminated
         while (!playFound) {
             const drawn = performDraw(newState, pIndex, 1);
-            if (drawn.length === 0) break; // Deck empty and discard empty (rare)
+            if (drawn.length === 0) break;
             drawnCard = drawn[0];
 
-            // Check Elimination
             if (player.hand.length >= 25) {
                  const updates = eliminatePlayer(newState, pIndex);
                  syncState({ ...updates, isBotThinking: false });
@@ -443,9 +441,7 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
         }
 
         if (playFound && drawnCard) {
-            // "Must Play" logic for No Mercy
             const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
-            
             if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK || face.value === CardValue.SEVEN) {
                  syncState({
                      deck: newState.deck,
@@ -454,28 +450,22 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
                      lastActionDescription: `${player.name} drew until playable: ${face.value}`,
                      isBotThinking: false
                  });
-                 setTimeout(() => {
-                     get().playCard(player.id, drawnCard!.id);
-                 }, 200);
+                 setTimeout(() => { get().playCard(player.id, drawnCard!.id); }, 200);
                  return;
             }
-
-            // Normal Card: Auto Play immediately
             const updates = calculatePlayUpdates(newState as GameState, pIndex, drawnCard, face.color, null);
             syncState({ ...updates, isBotThinking: false });
         }
         return;
     } 
     
-    // CLASSIC / FLIP / SPEED: Draw 1, Must Play if Playable
+    // CLASSIC: Draw 1, Play if able
     else {
         const drawn = performDraw(newState, pIndex, 1);
         const drawnCard = drawn[0];
         
         if (drawnCard && checkPlayable(drawnCard, state)) {
-            // Auto Play Logic
             const face = state.activeSide === 'light' ? drawnCard.light : drawnCard.dark;
-
             if (face.color === CardColor.WILD || face.color === CardColor.WILD_DARK) {
                  syncState({
                      deck: newState.deck,
@@ -484,17 +474,12 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
                      lastActionDescription: `${player.name} drew a Playable Wild!`,
                      isBotThinking: false
                  });
-                 setTimeout(() => {
-                     get().playCard(player.id, drawnCard.id);
-                 }, 200);
+                 setTimeout(() => { get().playCard(player.id, drawnCard.id); }, 200);
                  return;
             }
-
-            // Execute Play immediately
             const updates = calculatePlayUpdates(newState as GameState, pIndex, drawnCard, face.color, null);
             syncState({ ...updates, isBotThinking: false });
         } else {
-            // Pass Turn
             const nextIdx = getNextIndex(state.players.length, state.currentPlayerIndex, state.direction);
             syncState({
                 deck: newState.deck,
@@ -509,16 +494,14 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
   },
 
   resetGame: () => {
-      // In multiplayer, reset goes back to waiting room? Or re-starts?
-      // Assuming re-lobby
       const s = get();
       if (s.roomId) {
-          // Keep room, reset game state
            const newState: Partial<GameState> = {
                 status: 'WAITING',
                 deck: [],
                 discardPile: [],
-                winner: null
+                winner: null,
+                rouletteColor: null
             };
             syncState(newState);
       } else {
@@ -530,39 +513,30 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
      const state = get();
      if (state.status !== 'PLAYING' || state.pendingAction.type) return;
      
-     // Local Game or Host of Multi Game checks
      const isLocal = !state.roomId;
      const isHost = state.roomId && state.hostId === state.myId;
      if (!isLocal && !isHost) return;
 
      const currentPlayer = state.players[state.currentPlayerIndex];
      
-     // BOT LOGIC: CATCH UNO
-     // If any player has 1 card and !hasCalledUno, bot has 30% chance to catch them
      const vulnerable = state.players.find(p => p.hand.length === 1 && !p.hasCalledUno && p.id !== currentPlayer.id);
      if (vulnerable && Math.random() < 0.3) {
          get().challengeUno(currentPlayer.id);
-         return; // Action taken
+         return; 
      }
 
      if (!currentPlayer?.isBot) return;
-
-     // Prevent re-entry if already thinking
      if (state.isBotThinking) return;
      
      set({ isBotThinking: true });
 
-     // Execution delay
      setTimeout(() => {
          const fresh = get();
-         // Verify it is still this bot's turn
          if (fresh.currentPlayerIndex !== state.currentPlayerIndex || fresh.status !== 'PLAYING') {
              set({ isBotThinking: false });
              return; 
          }
          
-         // BOT LOGIC: CALL UNO
-         // If bot has 2 cards (will have 1 after play), call UNO with 80% chance
          if (currentPlayer.hand.length === 2 && Math.random() < 0.8) {
              fresh.declareUno(currentPlayer.id);
          }
@@ -576,11 +550,9 @@ export const useGameStore = create<ExtendedGameState & GameActions>((set, get) =
          } else {
              get().drawCard(currentPlayer.id);
          }
-     }, 1000); // 1 second thinking time
+     }, 1000); 
   }
 }));
-
-// --- ENGINE HELPER FUNCTIONS (PURE-ISH) ---
 
 const performDraw = (state: any, playerIdx: number, count: number) => {
     const drawn: Card[] = [];
@@ -603,7 +575,6 @@ const performDraw = (state: any, playerIdx: number, count: number) => {
 
 const eliminatePlayer = (state: any, pIdx: number) => {
     const player = state.players[pIdx];
-    // Simple Elimination: Remove player or End Game
     state.discardPile.push(...player.hand);
     player.hand = [];
     player.cardCount = 0;
@@ -632,10 +603,13 @@ const eliminatePlayer = (state: any, pIdx: number) => {
 };
 
 export const checkPlayable = (card: Card, state: GameState): boolean => {
-    const { activeSide, currentColor, discardPile, drawStack } = state;
+    const { activeSide, currentColor, discardPile, drawStack, rouletteColor } = state;
     const top = discardPile[discardPile.length - 1];
     
     if (!top) return false;
+    
+    // If Roulette is active, NO card is playable. Must draw.
+    if (rouletteColor) return false;
 
     const face = activeSide === 'light' ? card.light : card.dark;
     const topFace = activeSide === 'light' ? top.light : top.dark;
@@ -644,6 +618,8 @@ export const checkPlayable = (card: Card, state: GameState): boolean => {
         if (state.gameMode === GameMode.NO_MERCY) {
             const val = getStackValue(face.value);
             const topVal = getStackValue(topFace.value) || 2; 
+            // Stacking: Can play if value is >= top value.
+            // +10 >= +6 >= +4 >= +2
             if (val >= topVal) return true;
         } else {
             if (face.value === CardValue.DRAW_TWO && topFace.value === CardValue.DRAW_TWO) return true;
@@ -659,26 +635,20 @@ export const checkPlayable = (card: Card, state: GameState): boolean => {
 };
 
 const getStackValue = (v: CardValue): number => {
-    if (v === CardValue.DRAW_TWO) return 2;
-    if (v === CardValue.WILD_DRAW_FOUR) return 4;
-    if (v === CardValue.WILD_DRAW_SIX) return 6;
     if (v === CardValue.WILD_DRAW_TEN) return 10;
+    if (v === CardValue.WILD_DRAW_SIX) return 6;
+    if (v === CardValue.WILD_DRAW_FOUR) return 4;
+    if (v === CardValue.DRAW_TWO) return 2;
     if (v === CardValue.DRAW_FIVE) return 5;
     return 0;
 };
 
 const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosenColor: CardColor, swapTargetId: string | null): Partial<GameState> => {
-    const players = JSON.parse(JSON.stringify(state.players)); // Deep clone for safety
+    const players = JSON.parse(JSON.stringify(state.players));
     const player = players[pIdx];
     
-    // Remove card
     player.hand = player.hand.filter((c: Card) => c.id !== card.id);
     player.cardCount = player.hand.length;
-    
-    // Reset UNO flag on play, unless they are at 1 card now (vulnerable)
-    // Actually, if they play and reach 1 card, they should have called UNO *before* or *during* this play.
-    // If they didn't, hasCalledUno is false, and they are now vulnerable until next turn.
-    // If they have 0 cards, they win.
     
     const face = state.activeSide === 'light' ? card.light : card.dark;
     let nextColor = chosenColor || face.color;
@@ -686,6 +656,7 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
     let nextStack = state.drawStack;
     let nextDirection = state.direction;
     let nextTurnSkip = 0;
+    let nextRouletteColor: CardColor | null = null;
     let description = `${player.name} played ${face.value}`;
 
     // Effects
@@ -704,6 +675,14 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
         if (players.length === 2) nextTurnSkip = 1;
         description += " (Reverse)";
     }
+    
+    // No Mercy +4 Reverse Logic
+    if (state.gameMode === GameMode.NO_MERCY && face.value === CardValue.WILD_DRAW_FOUR) {
+        nextDirection = nextDirection === 1 ? -1 : 1;
+        description += " (Reverse +4)";
+        if (players.length === 2) nextTurnSkip = 1; 
+    }
+
     if (face.value === CardValue.SKIP_EVERYONE) {
         nextTurnSkip = -1; 
         description += " (SKIP ALL)";
@@ -741,24 +720,26 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
                 description += ` (Swapped with ${target.name})`;
             }
         }
+        // Wild Color Roulette
+        if (face.value === CardValue.WILD_COLOR_ROULETTE) {
+            nextRouletteColor = chosenColor;
+            description += ` (Roulette: ${chosenColor})`;
+        }
     }
 
     // Win Check
     let winner = null;
     if (player.hand.length === 0) winner = player;
     
-    // MERCY RULE CHECK (Post-Play)
     if (state.gameMode === GameMode.NO_MERCY && player.hand.length >= 25) {
         const elimResult = eliminatePlayer({ ...state, players, discardPile: [...state.discardPile, card] }, pIdx);
         if (players.length === 2) {
              winner = players.find((p: Player) => p.id !== player.id);
-             description += " (ELIMINATED)";
-             return { ...elimResult, winner, lastActionDescription: description };
+             return { ...elimResult, winner, lastActionDescription: description + " (ELIMINATED)" };
         }
         return { ...elimResult, lastActionDescription: description + " (ELIMINATED)" };
     }
 
-    // Next Turn
     let nextIdx = state.currentPlayerIndex;
     if (nextTurnSkip === -1) {
         nextIdx = pIdx; 
@@ -775,6 +756,7 @@ const calculatePlayUpdates = (state: GameState, pIdx: number, card: Card, chosen
         direction: nextDirection,
         drawStack: nextStack,
         currentPlayerIndex: nextIdx,
+        rouletteColor: nextRouletteColor,
         lastActionDescription: description,
         winner
     };
